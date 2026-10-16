@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+web/node_modules/
+web/.next/
+sim/checkpoints/runs/
