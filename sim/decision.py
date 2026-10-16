@@ -116,7 +116,7 @@ def decide(world, car: Car, commit: bool = True) -> tuple[float, float, dict]:
     if unavailable_note:
         constraints.append(unavailable_note)
     if world.wet:
-        constraints.append("Wet pavement: accel and brake capped at 3 m/s\u00b2")
+        constraints.append("Wet pavement: accel and brake capped at 3 m/s²")
     commit_action(car, chose, hazard)
     accel, steer = controls(car, hazard, limit)
     shown_target = car.target_speed
@@ -403,7 +403,7 @@ def _sentence(car: Car, wanted: str, chose: str, filter_info: dict | None, view:
 
 def _model_section(car: Car, view: Sense, probs, value) -> dict:
     label = BRAINS.get(car.brain, {}).get("label", car.brain.title())
-    seed = "\u2014" if car.seed is None else str(car.seed)
+    seed = "—" if car.seed is None else str(car.seed)
     if car.uses_network and car.model is not None and probs is None:
         return {
             "loaded": True,
