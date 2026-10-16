@@ -1,21 +1,52 @@
-# Autonomous Driving Env
+# The crossing
 
-A 2D simulated world for training autonomous vehicles, then changing that world while they drive.
+One signalized intersection, six cars, and a click-a-car inspector that shows the decision frame each car just computed. Surprises (flip the light, all-red, a jaywalker, a stall, a cut-in, wet pavement) change the running world. They do not reset it.
 
-## Vision
+The Python sim is the source of truth. The page only draws snapshots and sends commands.
 
-Many cars learn to drive in a simple virtual city. After training, a person can perturb the world while the cars are moving: a traffic light changes at the wrong time, a pedestrian steps into the road, or something similarly unexpected happens. The cars keep driving, and you watch what they do.
+## Run it
 
-The world is two-dimensional on purpose. The point is behavior under surprise, not a photorealistic city.
+From this directory, in two terminals:
 
-## Status
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m uvicorn sim.server:app --host 0.0.0.0 --port 43124
+```
 
-Not runnable yet. This repository has the project description and a survey of existing simulators. There is no simulator, training loop, or application code.
+```bash
+cd web
+npm install
+npm run dev
+```
 
-## Survey
+- Web: http://127.0.0.1:43123
+- API: http://127.0.0.1:43124 (`GET /health`, websocket `/ws`)
 
-See [docs/av-sim-landscape.md](docs/av-sim-landscape.md) for open-source projects that train vehicles in simulation, with an emphasis on 2D worlds and live user interventions.
+Play and pause with the button or the space bar. Left and right arrows cycle the selected car.
 
-## License
+## What is driving
 
-MIT. See [LICENSE](LICENSE).
+| Car | Brain |
+| --- | --- |
+| Ada | Cautious rules (no network) |
+| Rex | Impatient rules (no network) |
+| Mina, Theo | Careful PPO, seeds 0 and 1 |
+| Jules, Nova | Hurried PPO, seeds 0 and 1 |
+
+Checkpoints in `sim/checkpoints/` are Stable-Baselines3 PPO, `MlpPolicy`, two hidden layers of 64. The town loads them on first start. Retrain the checked-in set with:
+
+```bash
+python3 -m sim.train --steps 8192
+```
+
+The Train view in the app starts a shorter run, plots episode reward and crash rate, and hot-swaps the new weights onto the cars of that mix.
+
+## Tests
+
+```bash
+python3 -m pytest
+```
+
+## Elsewhere in this repo
+
+`docs/av-sim-landscape.md` is a survey of how other driving simulators expose scenes, actors, and policies. This app copies a few of those mechanisms. It does not vendor Waymo, SUMO, or CARLA.
