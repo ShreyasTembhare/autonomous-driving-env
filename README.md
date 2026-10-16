@@ -33,7 +33,7 @@ Play and pause with the button or the space bar. Left and right arrows cycle the
 | Mina, Theo | Careful PPO, seeds 0 and 1 |
 | Jules, Nova | Hurried PPO, seeds 0 and 1 |
 
-Checkpoints in `sim/checkpoints/` are Stable-Baselines3 PPO, `MlpPolicy`, two hidden layers of 64. The town loads them on first start. Retrain the checked-in set with:
+Checkpoints in `sim/checkpoints/` are Stable-Baselines3 PPO, `MlpPolicy`, two hidden layers of 64. The town loads them on first start. A clone without the zips rebuilds them from the `.b64` text on first load. Retrain the checked-in set with:
 
 ```bash
 python3 -m sim.train --steps 8192
