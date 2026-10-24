@@ -27,6 +27,10 @@ MAX_SPEED = 16.0
 HISTORY = 50
 PED_TTC = 1.6
 CAR_TTC = 1.4
+PED_STOP_MARGIN = 4.0
+CAR_FOLLOW_MARGIN = 4.0
+LANE_HALF = 1.8
+BOX_CLEAR = 18.0
 
 # Lane index 0 is the right lane, 1 is the left. The value is the fixed
 # coordinate: y for east/west traffic, x for north/south.
@@ -133,6 +137,18 @@ def stopping_distance(speed: float, brake: float) -> float:
     if speed <= 0 or brake <= 0:
         return 0.0
     return (speed * speed) / (2.0 * brake)
+
+
+def closing_distance(speed: float, lead_speed: float, brake: float) -> float:
+    """Meters needed to match a slower lead, not a full stop."""
+    if speed <= lead_speed or brake <= 0:
+        return 0.0
+    return (speed * speed - lead_speed * lead_speed) / (2.0 * brake)
+
+
+def in_box(s: float) -> bool:
+    """True while the car center is between the two stop lines."""
+    return STOP_LINE < s < -STOP_LINE
 
 
 def dist_to_stop(s: float) -> float:

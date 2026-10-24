@@ -7,8 +7,8 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from sim.geom import ACTIONS
-from sim.perception import OBS_DIM, sense
-from sim.world import World
+from sim.legacy.perception import OBS_DIM, sense
+from sim.legacy.world import World
 
 
 class CrossingEnv(gym.Env):

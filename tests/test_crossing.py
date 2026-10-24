@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from sim.actors import Pedestrian
 from sim.decision import network_preference
 from sim.geom import HALF_LEN, STOP_LINE
@@ -181,6 +183,142 @@ def test_snapshot_has_one_decision_frame_per_car():
         assert "options" in frame
         assert "meta_action" in frame
         assert len(frame["options"]) == 5
+
+
+def _solo(seed: int, car_id: str, axis: str, lane: int, s: float, speed: float, wet: bool = False):
+    from sim.geom import pose
+
+    world = World(seed=seed, load_policies=False)
+    world.peds.clear()
+    world.allow_respawn = False
+    _park_others(world, car_id)
+    car = world.car(car_id)
+    car.stalled = False
+    car.axis = axis
+    car.lane_index = lane
+    car.target_lane_index = lane
+    car.x, car.y, car.heading = pose(axis, lane, s)
+    car.s = s
+    car.speed = speed
+    car.target_speed = speed
+    car.cruise = speed
+    world.wet = wet
+    world.signal.set_phase("ns_green", 10**6)
+    return world, car
+
+
+def _park(world: World, car, axis: str, lane: int, s: float) -> None:
+    from sim.geom import pose
+
+    car.axis = axis
+    car.lane_index = lane
+    car.target_lane_index = lane
+    car.x, car.y, car.heading = pose(axis, lane, s)
+    car.s = s
+    car.speed = 0.0
+    car.target_speed = 0.0
+
+
+@pytest.mark.parametrize("wet", [False, True])
+def test_jaywalk_in_front_of_fast_car_does_not_hit(wet):
+    # Wet needs about 24 m to stop from 12 m/s, so it starts where Nova starts.
+    world, rex = _solo(11, "rex", "north", 1, -48.0 if wet else -40.0, 12.0, wet=wet)
+    rex.brain = "hurried"
+    world.apply({"op": "jaywalk", "approach": "south"})
+    for _ in range(150):
+        world.step()
+    assert not rex.hit_ped
+    assert not any(p.hit for p in world.peds)
+
+
+def test_stalled_lead_does_not_cause_crash():
+    world, rex = _solo(12, "rex", "north", 1, -45.0, 12.0, wet=True)
+    lead = world.car("nova")
+    _park(world, lead, "north", 1, -12.0)
+    world.apply({"op": "stall", "car": "nova"})
+    for _ in range(160):
+        world.step()
+    assert not rex.crashed
+    assert not lead.crashed
+
+
+def test_cut_in_follower_brakes_before_lane_change_finishes():
+    world, rex = _solo(13, "rex", "north", 1, -40.0, 11.0)
+    cutter = world.car("nova")
+    _park(world, cutter, "north", 0, -20.0)
+    cutter.stalled = False
+    cutter.speed = 5.0
+    cutter.target_speed = 5.0
+    world.apply({"op": "cut_in", "car": "nova", "lane": 1})
+    first = None
+    for _ in range(60):
+        world.step()
+        if first is None and rex.accel < 0:
+            first = world.tick
+        if cutter.lane_index == 1:
+            break
+    assert first is not None
+    assert not rex.crashed and not cutter.crashed
+
+
+def test_flip_cross_traffic_waits_for_box():
+    world, ada = _solo(14, "ada", "east", 0, -30.0, 8.0)
+    thru = world.car("rex")
+    _park(world, thru, "north", 0, -4.0)
+    thru.stalled = False
+    thru.speed = 5.0
+    thru.target_speed = 5.0
+    world.signal.set_phase("ew_green", 10**6)
+    entered_with_box_busy = False
+    for _ in range(120):
+        world.step()
+        from sim.geom import in_box
+
+        if in_box(thru.s) and in_box(ada.s):
+            entered_with_box_busy = True
+    assert not entered_with_box_busy
+    assert not ada.crashed and not thru.crashed
+
+
+def test_all_red_car_with_room_stops_before_line():
+    from sim.geom import HALF_LEN
+
+    world, rex = _solo(15, "rex", "north", 1, -38.0, 11.0)
+    world.apply({"op": "all_red"})
+    top = -999.0
+    for _ in range(120):
+        world.step()
+        top = max(top, rex.s + HALF_LEN)
+    assert top < STOP_LINE + 0.25
+
+
+def test_car_already_in_box_clears_on_all_red():
+    world, rex = _solo(16, "rex", "north", 1, -3.0, 8.0)
+    world.apply({"op": "all_red"})
+    for _ in range(80):
+        world.step()
+    assert rex.s > 8.0
+    assert not rex.crashed
+
+
+def test_pedestrian_inside_stopping_distance_is_not_hit():
+    world, rex = _solo(17, "rex", "north", 1, -30.0, 14.0, wet=True)
+    jay = Pedestrian(
+        id="jay-close",
+        kind="jaywalker",
+        name="Jaywalker",
+        x=rex.x - 6.0,
+        y=rex.y + 14.0,
+        heading=0.0,
+        speed=1.7,
+        path=[(rex.x - 6.0, rex.y + 14.0), (rex.x + 6.0, rex.y + 14.0)],
+        moving=True,
+        cruise=1.7,
+    )
+    world.peds = [jay]
+    for _ in range(100):
+        world.step()
+    assert not jay.hit
 
 
 class pytest_close:

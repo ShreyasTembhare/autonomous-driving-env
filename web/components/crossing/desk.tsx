@@ -89,6 +89,13 @@ export function Desk() {
         <Button size="sm" variant="outline" onClick={() => send({ op: "reset" })}>
           Reset
         </Button>
+        <Button
+          size="sm"
+          variant={surpriseOpen ? "secondary" : "outline"}
+          onClick={() => setSurpriseOpen(true)}
+        >
+          Surprises
+        </Button>
         <div className="ml-auto flex items-center gap-2">
           <Status status={status} onRetry={retry} />
         </div>
@@ -110,18 +117,12 @@ export function Desk() {
       ) : snap ? (
         <>
           <div className="flex gap-2 border-b px-3 py-2 md:hidden">
-            <Button size="sm" variant="outline" onClick={() => setSurpriseOpen(true)}>
-              Surprises
-            </Button>
             <Button size="sm" variant="outline" onClick={() => setInspectOpen(true)}>
               Inspector
             </Button>
           </div>
-          <div className="grid min-h-0 flex-1 md:grid-cols-[280px_minmax(0,1fr)_340px]">
-            <aside className="hidden min-h-0 border-r md:block">
-              <SurprisePanel snap={snap} selectedId={selectedId} send={send} />
-            </aside>
-            <main className="relative min-h-0">
+          <div className="min-h-0 flex-1">
+            <main className="relative h-full min-h-0">
               {status === "error" ? (
                 <div className="absolute inset-x-0 top-2 z-10 mx-auto flex w-fit items-center gap-2 rounded-md border bg-popover px-3 py-2 text-xs">
                   The sim socket dropped.
@@ -148,10 +149,20 @@ export function Desk() {
                   Paused
                 </div>
               ) : null}
+              {selected ? (
+                <aside className="absolute inset-y-0 right-0 z-10 hidden w-[340px] border-l bg-background/95 shadow-xl backdrop-blur md:block">
+                  <button
+                    type="button"
+                    aria-label="Close inspector"
+                    onClick={() => setSelectedId(null)}
+                    className="absolute top-2 right-2 z-10 size-7 rounded-md text-sm hover:bg-muted"
+                  >
+                    ×
+                  </button>
+                  <Inspector car={selected} paused={snap.paused} />
+                </aside>
+              ) : null}
             </main>
-            <aside className="hidden min-h-0 border-l md:block">
-              <Inspector car={selected} paused={snap.paused} />
-            </aside>
           </div>
           <footer className="border-t">
             <Fleet cars={snap.cars} selectedId={selectedId} onSelect={setSelectedId} />

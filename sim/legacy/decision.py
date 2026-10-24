@@ -4,23 +4,29 @@ from __future__ import annotations
 
 import math
 
-from sim.actors import Car
+from sim.legacy.actors import Car
 from sim.geom import (
     ACTION_LABEL,
     ACTIONS,
+    BOX_CLEAR,
+    CAR_FOLLOW_MARGIN,
     CAR_TTC,
     DRY_ACCEL,
     HEADING,
     LATERAL,
     MAX_SPEED,
     MAX_STEER,
+    PED_STOP_MARGIN,
     PED_TTC,
+    STOP_LINE,
     WET_ACCEL,
+    closing_distance,
     left_error,
+    stopping_distance,
     wrap,
 )
 from sim.kinematics import step_bicycle
-from sim.perception import Sense, sense
+from sim.legacy.perception import Sense, ped_lane_gap, sense
 
 BRAINS = {
     "cautious": {"desired": 8.0, "gap": 14.0, "patience": 0.15, "label": "Cautious"},
@@ -112,11 +118,11 @@ def decide(world, car: Car, commit: bool = True) -> tuple[float, float, dict]:
     saved_lane = car.target_lane_index
     raw, scores, probs, value = preference(car, view)
     wanted, unavailable_note = _best_available(raw, scores, view)
-    chose, filter_info, constraints, hazard = _filter(wanted, view, car, world)
+    chose, filter_info, constraints, hazard, story = _filter(wanted, view, car, world)
     if unavailable_note:
         constraints.append(unavailable_note)
     if world.wet:
-        constraints.append("Wet pavement: accel and brake capped at 3 m/s²")
+        constraints.append("Wet pavement: accel and brake capped at 3 m/sÂ²")
     commit_action(car, chose, hazard)
     accel, steer = controls(car, hazard, limit)
     shown_target = car.target_speed
@@ -137,6 +143,7 @@ def decide(world, car: Car, commit: bool = True) -> tuple[float, float, dict]:
         limit,
         filter_info,
         shown_target,
+        story,
     )
     return accel, steer, frame
 
@@ -254,45 +261,121 @@ def _best_available(raw: str, scores: dict[str, float], view: Sense) -> tuple[st
     return "IDLE", "No move is available"
 
 
-def _filter(wanted: str, view: Sense, car: Car, world) -> tuple[str, dict | None, list[str], bool]:
+def _filter(wanted: str, view: Sense, car: Car, world) -> tuple[str, dict | None, list[str], bool, str | None]:
     constraints: list[str] = []
     reason = None
     chose = wanted
     hazard = False
-    if view.ped_ttc is not None and view.ped_ttc < PED_TTC:
-        text = f"pedestrian time-to-collision {view.ped_ttc:.1f}s"
-        constraints.append(f"Pedestrian time-to-collision {view.ped_ttc:.1f}s")
-        hazard = True
-        if wanted != "SLOWER":
-            chose = "SLOWER"
-            reason = text
-    elif view.car_ttc is not None and view.car_ttc < CAR_TTC:
-        text = f"vehicle time-to-collision {view.car_ttc:.1f}s"
-        constraints.append(f"Vehicle time-to-collision {view.car_ttc:.1f}s")
-        hazard = True
-        if wanted != "SLOWER":
-            chose = "SLOWER"
-            reason = text
+    story = None
     limit = accel_limit(world)
-    from sim.geom import STOP_LINE, stopping_distance
-
-    # The center of the car is the point that has "entered". A bumper that has
-    # just crossed still has to finish the stop; releasing the brake there is
-    # how a car rolls through on red.
     center_before = car.s < STOP_LINE + 0.3
-    need = stopping_distance(car.speed, limit) + 6.0
-    close = view.dist_stop < 4.0 and car.speed > 0.35
-    creeping = view.dist_stop < 1.0 and center_before
-    if view.signal_color == "red" and center_before and (view.dist_stop < need or close or creeping):
-        constraints.append("Red light before the stop line")
+    stop_need = stopping_distance(car.speed, limit)
+    evading = False
+
+    ped_imminent = view.ped_ttc is not None and view.ped_ttc < PED_TTC
+    ped_gap = view.ped_path_gap
+    ped_too_close = ped_gap is not None and ped_gap < stop_need + PED_STOP_MARGIN
+    if ped_imminent or ped_too_close:
+        if ped_imminent:
+            text = f"pedestrian time-to-collision {view.ped_ttc:.1f}s"
+            constraints.append(f"Pedestrian time-to-collision {view.ped_ttc:.1f}s")
+        else:
+            text = "pedestrian path closer than the stopping distance"
+            constraints.append("Pedestrian path closer than the stopping distance")
+        hazard = True
+        evade = _evade_action(car, view, world, ped_gap, limit)
+        if evade is not None:
+            chose = evade
+            reason = "leaving the lane to avoid the pedestrian"
+            story = "leaving the lane to avoid the pedestrian"
+            constraints.append("Leaving the lane to avoid the pedestrian")
+            evading = True
+        elif wanted != "SLOWER":
+            chose = "SLOWER"
+            reason = text
+        else:
+            chose = "SLOWER"
+
+    if not evading:
+        car_imminent = view.car_ttc is not None and view.car_ttc < CAR_TTC
+        lead_need = closing_distance(car.speed, view.lead_speed, limit) + CAR_FOLLOW_MARGIN
+        lead_too_close = view.lead_gap is not None and view.lead_gap < lead_need
+        if car_imminent:
+            text = f"vehicle time-to-collision {view.car_ttc:.1f}s"
+            constraints.append(f"Vehicle time-to-collision {view.car_ttc:.1f}s")
+            hazard = True
+            if chose not in ("SLOWER", "LANE_LEFT", "LANE_RIGHT"):
+                chose = "SLOWER"
+                reason = reason or text
+        elif lead_too_close:
+            text = "vehicle gap shorter than the stopping distance"
+            constraints.append("Vehicle gap shorter than the stopping distance")
+            hazard = True
+            if chose not in ("SLOWER", "LANE_LEFT", "LANE_RIGHT"):
+                chose = "SLOWER"
+                reason = reason or text
+
+    can_stop = view.dist_stop >= stop_need
+    near_line = view.dist_stop < stop_need + 10.0
+    if not evading and center_before and can_stop and near_line and view.box_occupied:
+        constraints.append("Waiting because the box is occupied")
+        hazard = True
+        if view.signal_color == "green":
+            story = "waiting on green because the box is occupied"
+            text = "waiting on green because the box is occupied"
+        else:
+            text = "occupied intersection"
+        if chose != "SLOWER":
+            chose = "SLOWER"
+            reason = reason or text
+
+    stop_for_signal = _must_stop_for_signal(view, car, limit)
+    if not evading and center_before and stop_for_signal and (can_stop or view.dist_stop < 1.0):
+        if view.signal_color == "red":
+            constraints.append("Red light before the stop line")
+            text = "red light before the stop line"
+        else:
+            constraints.append("Yellow too short to clear the box")
+            text = "yellow too short to clear the box"
         hazard = True
         if chose != "SLOWER":
             chose = "SLOWER"
-            reason = reason or "red light before the stop line"
+            reason = reason or text
+
     info = None
     if reason is not None and chose != wanted:
         info = {"wanted": wanted, "chose": chose, "reason": reason}
-    return chose, info, constraints, hazard
+    return chose, info, constraints, hazard, story
+
+
+def _must_stop_for_signal(view: Sense, car: Car, limit: float) -> bool:
+    color = view.signal_color
+    if color == "red":
+        return True
+    if color != "yellow":
+        return False
+    time_to_clear = (max(view.dist_stop, 0.0) + BOX_CLEAR) / max(car.speed, 1.0)
+    return time_to_clear > view.phase_remaining
+
+
+def _evade_action(car: Car, view: Sense, world, ped_gap: float | None, limit: float) -> str | None:
+    """Leave the lane only when a full stop still reaches the person."""
+    if ped_gap is None or car.speed < 2.0:
+        return None
+    # Braking alone is the first answer. Swerve only when it clearly cannot stop short.
+    if ped_gap >= 0.8 * stopping_distance(car.speed, limit):
+        return None
+    options: list[tuple[str, int]] = []
+    if view.can_left:
+        options.append(("LANE_LEFT", car.lane_index + 1))
+    if view.can_right:
+        options.append(("LANE_RIGHT", car.lane_index - 1))
+    for action, lane in options:
+        other_gap = ped_lane_gap(car, lane, world.peds)
+        if other_gap is not None and other_gap < stopping_distance(car.speed, limit) + PED_STOP_MARGIN + 4.0:
+            continue
+        return action
+    return None
 
 
 def _frame(
@@ -309,6 +392,7 @@ def _frame(
     limit: float,
     filter_info: dict | None,
     target_speed: float | None,
+    story: str | None = None,
 ) -> dict:
     options = []
     for action in ACTIONS:
@@ -336,7 +420,7 @@ def _frame(
                 "wanted": action == wanted and wanted in ACTION_LABEL,
             }
         )
-    sentence = _sentence(car, wanted, chose, filter_info, view)
+    sentence = _sentence(car, wanted, chose, filter_info, view, story)
     model = _model_section(car, view, probs, value)
     return {
         "sentence": sentence,
@@ -366,11 +450,17 @@ def _frame(
     }
 
 
-def _sentence(car: Car, wanted: str, chose: str, filter_info: dict | None, view: Sense) -> str:
+def _sentence(
+    car: Car, wanted: str, chose: str, filter_info: dict | None, view: Sense, story: str | None = None
+) -> str:
     if car.crashed:
         return "Crashed and stopped."
     if car.stalled:
         return "Stalled in the lane. This car is not choosing a move."
+    if story and filter_info is not None:
+        return f"wanted {filter_info['wanted']}, filter chose {filter_info['chose']}, {story}."
+    if story:
+        return story[0].upper() + story[1:] + "."
     if filter_info is not None:
         return f"wanted {filter_info['wanted']}, filter chose {filter_info['chose']}, {filter_info['reason']}."
     color = view.signal_color
@@ -403,7 +493,7 @@ def _sentence(car: Car, wanted: str, chose: str, filter_info: dict | None, view:
 
 def _model_section(car: Car, view: Sense, probs, value) -> dict:
     label = BRAINS.get(car.brain, {}).get("label", car.brain.title())
-    seed = "—" if car.seed is None else str(car.seed)
+    seed = "â€”" if car.seed is None else str(car.seed)
     if car.uses_network and car.model is not None and probs is None:
         return {
             "loaded": True,
