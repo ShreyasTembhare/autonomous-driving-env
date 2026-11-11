@@ -21,6 +21,7 @@ import { useToast } from "@astryxdesign/core/Toast";
 import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
 import { VStack } from "@astryxdesign/core/VStack";
 import { CrossingCanvas } from "@/components/crossing/canvas-view";
+import { TownRail } from "@/components/crossing/town-rail";
 import { CarsMenu } from "@/components/crossing/fleet";
 import { Inspector } from "@/components/crossing/inspector";
 import { SceneMenu } from "@/components/crossing/surprises";
@@ -44,6 +45,7 @@ export function Desk() {
   const [previewPoints, setPreviewPoints] = useState<[number, number][] | null>(null);
   const [pendingPoint, setPendingPoint] = useState<{ x: number; y: number } | null>(null);
   const [seenGuide, setSeenGuide] = useState(true);
+  const [railOpen, setRailOpen] = useState(true);
   const lastCar = useRef<CarSnap | null>(null);
   const seenNotices = useRef(new Set<number>());
 
@@ -178,6 +180,9 @@ export function Desk() {
             onClick={() => send({ op: snap.paused ? "play" : "pause" })}
           />
           <Button label="Guide" size="sm" variant="ghost" onClick={() => setHelpOpen(true)} />
+          {view === "town" && !railOpen ? (
+            <Button label="District" size="sm" variant="ghost" onClick={() => setRailOpen(true)} />
+          ) : null}
         </HStack>
       }
       endContent={
@@ -253,18 +258,34 @@ export function Desk() {
     content = <TrainView train={snap.train} send={send} />;
   } else if (snap) {
     content = (
-      <CrossingCanvas
-        snap={snap}
-        network={network}
-        selectedId={selectedId}
-        hoverPathKey={hoverPath}
-        follow={follow}
-        previewPoints={previewPoints}
-        tripPicking={tripMode !== "idle"}
-        onSelect={setSelectedId}
-        onSelectNode={setSelectedNode}
-        onMapClick={(x, y) => setPendingPoint({ x, y })}
-      />
+      <HStack height="100%" width="100%" gap={0} vAlign="stretch">
+        {railOpen ? (
+          <TownRail
+            snap={snap}
+            network={network}
+            selectedId={selectedId}
+            selectedNode={selectedNode}
+            onSelect={setSelectedId}
+            onSelectNode={setSelectedNode}
+            onHide={() => setRailOpen(false)}
+            send={send}
+          />
+        ) : null}
+        <VStack height="100%" className="min-w-0 flex-1">
+          <CrossingCanvas
+            snap={snap}
+            network={network}
+            selectedId={selectedId}
+            hoverPathKey={hoverPath}
+            follow={follow}
+            previewPoints={previewPoints}
+            tripPicking={tripMode !== "idle"}
+            onSelect={setSelectedId}
+            onSelectNode={setSelectedNode}
+            onMapClick={(x, y) => setPendingPoint({ x, y })}
+          />
+        </VStack>
+      </HStack>
     );
   } else {
     content = null;
