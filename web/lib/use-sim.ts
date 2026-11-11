@@ -1,15 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Snapshot, SocketStatus } from "@/lib/types";
+import type { NetworkMap, RoutePreview, Snapshot, SocketStatus } from "@/lib/types";
 
 const PORT = 43124;
+
+function baseUrl() {
+  const host = typeof window !== "undefined" ? window.location.hostname || "127.0.0.1" : "127.0.0.1";
+  return `http://${host}:${PORT}`;
+}
 
 export function useSim() {
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [network, setNetwork] = useState<NetworkMap | null>(null);
   const [attempt, setAttempt] = useState(0);
   const socket = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${baseUrl()}/network`)
+      .then((r) => r.json())
+      .then((data: NetworkMap) => {
+        if (!cancelled) setNetwork(data);
+      })
+      .catch(() => {
+        /* socket status covers connectivity */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +70,16 @@ export function useSim() {
     }
   }, []);
 
+  const previewRoute = useCallback(async (start: string, dest: string, style = "careful") => {
+    const url = new URL(`${baseUrl()}/route`);
+    url.searchParams.set("start", start);
+    url.searchParams.set("dest", dest);
+    url.searchParams.set("style", style);
+    const res = await fetch(url);
+    return (await res.json()) as RoutePreview;
+  }, []);
+
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
-  return { status, snap, send, retry };
+  return { status, snap, network, send, previewRoute, retry };
 }

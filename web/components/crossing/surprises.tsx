@@ -1,124 +1,102 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
 import type { Snapshot } from "@/lib/types";
-
-const APPROACHES = ["north", "south", "east", "west"] as const;
 
 type Props = {
   snap: Snapshot;
   selectedId: string | null;
+  selectedNode: string | null;
   send: (message: Record<string, unknown>) => void;
 };
 
-export function SurprisePanel({ snap, selectedId, send }: Props) {
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b px-3 py-3">
-        <h2 className="text-sm font-medium">Surprises</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          These change the running town. Nothing resets until you ask.
-        </p>
-      </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-4 p-3">
-          <div>
-            <div className="mb-2 text-[11px] tracking-wide text-muted-foreground uppercase">
-              Signal
-            </div>
-            <div className="mb-2 grid grid-cols-2 gap-1.5">
-              {APPROACHES.map((approach) => (
-                <div
-                  key={approach}
-                  className="flex items-center justify-between rounded-md border px-2 py-1.5 text-xs"
-                >
-                  <span className="capitalize">{approach}</span>
-                  <Lamp color={snap.signal.approaches[approach]} />
-                </div>
-              ))}
-            </div>
-            <p className="mb-2 text-xs text-muted-foreground">
-              {snap.signal.label} · {snap.signal.remaining.toFixed(1)}s
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="secondary" onClick={() => send({ op: "flip" })}>
-                Flip
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => send({ op: "all_red" })}>
-                All-red
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => send({ op: "restore" })}>
-                Restore
-              </Button>
-            </div>
-          </div>
-          <div>
-            <div className="mb-2 text-[11px] tracking-wide text-muted-foreground uppercase">
-              The street
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <Button size="sm" variant="secondary" onClick={() => send({ op: "jaywalk" })}>
-                Jaywalk
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => send({ op: "stall", car: selectedId })}
-              >
-                Stall
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => send({ op: "cut_in" })}>
-                Cut-in
-              </Button>
-              <Button
-                size="sm"
-                variant={snap.wet ? "default" : "outline"}
-                onClick={() => send({ op: "wet", on: !snap.wet })}
-              >
-                {snap.wet ? "Wet pavement" : "Dry pavement"}
-              </Button>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {selectedId
-                ? "Stall stops the selected car in its lane."
-                : "Stall stops whoever is closest to the line. Cut-in sends Jules into Ada’s lane when he can."}
-            </p>
-          </div>
-          <div>
-            <div className="mb-2 text-[11px] tracking-wide text-muted-foreground uppercase">
-              What happened
-            </div>
-            {snap.log.length === 0 ? (
-              <p className="text-xs leading-5 text-muted-foreground">
-                Nothing yet. The cycle is running on its own.
-              </p>
-            ) : (
-              <ul className="space-y-1.5">
-                {snap.log.map((row) => (
-                  <li
-                    key={`${row.index}-${row.tick}`}
-                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-xs">{row.label}</div>
-                      <div className="font-mono text-[10px] text-muted-foreground">{row.time.toFixed(1)}s</div>
-                    </div>
-                    <Button size="xs" variant="ghost" onClick={() => send({ op: "replay", index: row.index })}>
-                      Replay
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </ScrollArea>
-    </div>
-  );
-}
+export function SceneMenu({ snap, selectedId, selectedNode, send }: Props) {
+  const node = selectedNode;
+  const signal = snap.signals.find((s) => s.node === node) ?? snap.signals[0];
+  const hasSignal = Boolean(node);
+  const hasCar = Boolean(selectedId);
+  const log = snap.log.slice(-8).reverse();
 
-function Lamp({ color }: { color: string }) {
-  const paint = color === "green" ? "#22c55e" : color === "yellow" ? "#facc15" : "#ef4444";
-  return <span className="inline-block size-2.5 rounded-full" style={{ background: paint }} />;
+  return (
+    <DropdownMenu
+      button={{ label: "Surprise", size: "sm", variant: "ghost" }}
+      menuWidth={300}
+      menuMaxHeight={480}
+      header={<Text color="secondary">Changes the town that is already running.</Text>}
+      footer={
+        <VStack gap={2} paddingBlock={2}>
+          <Text color="secondary">Log</Text>
+          {log.length === 0 ? (
+            <Text color="secondary">Nothing yet.</Text>
+          ) : (
+            <List density="compact" edge="flush">
+              {log.map((row) => (
+                <ListItem
+                  key={`${row.index}-${row.tick}`}
+                  label={row.label}
+                  endContent={<Text color="secondary">Replay</Text>}
+                  onClick={() => send({ op: "replay", index: row.index })}
+                />
+              ))}
+            </List>
+          )}
+        </VStack>
+      }
+      items={[
+        {
+          type: "section",
+          title: signal ? `${signal.name} · ${signal.label}` : "Signal",
+          items: [
+            {
+              label: "Flip",
+              description: hasSignal ? "Swap the green at this light" : "Click a signal on the map first",
+              isDisabled: !hasSignal,
+              onClick: () => send({ op: "flip", node }),
+            },
+            {
+              label: "All-red",
+              description: hasSignal ? "Hold every lamp red here" : "Click a signal on the map first",
+              isDisabled: !hasSignal,
+              onClick: () => send({ op: "all_red", node }),
+            },
+            {
+              label: "Restore",
+              description: hasSignal ? "Put this light back" : "Click a signal on the map first",
+              isDisabled: !hasSignal,
+              onClick: () => send({ op: "restore", node }),
+            },
+            { label: "Flip all", description: "Swap the green at every light", onClick: () => send({ op: "flip" }) },
+          ],
+        },
+        { type: "divider" },
+        {
+          type: "section",
+          title: "Street",
+          items: [
+            { label: "Jaywalk", description: "A person steps into the road", onClick: () => send({ op: "jaywalk", car: selectedId }) },
+            {
+              label: "Stall",
+              description: hasCar ? "Stop the selected car" : "Select a car first",
+              isDisabled: !hasCar,
+              onClick: () => send({ op: "stall", car: selectedId }),
+            },
+            {
+              label: "Cut-in",
+              description: hasCar ? "A car pulls in ahead of the selected one" : "Select a car first",
+              isDisabled: !hasCar,
+              onClick: () => send({ op: "cut_in", car: selectedId }),
+            },
+            {
+              label: snap.wet ? "Dry pavement" : "Wet pavement",
+              description: snap.wet ? "Back to a dry road" : "Lower grip for every car",
+              onClick: () => send({ op: "wet", on: !snap.wet }),
+            },
+          ],
+        },
+      ]}
+    />
+  );
 }

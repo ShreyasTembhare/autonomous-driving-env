@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import withStylex from "@stylexswc/nextjs-plugin/turbopack";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
@@ -14,4 +15,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withStylex({
+  rsOptions: {
+    aliases: { "@/*": ["./*"] },
+    unstable_moduleResolution: { type: "commonJS" },
+  },
+})(nextConfig);

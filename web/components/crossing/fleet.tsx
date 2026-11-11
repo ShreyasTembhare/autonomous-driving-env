@@ -1,48 +1,58 @@
 "use client";
 
-import type { CarSnap } from "@/lib/types";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { Text } from "@astryxdesign/core/Text";
+import type { CarSnap, Snapshot } from "@/lib/types";
 
-const LABELS: Record<string, string> = {
-  LANE_LEFT: "Left",
-  IDLE: "Hold",
-  LANE_RIGHT: "Right",
-  FASTER: "Faster",
-  SLOWER: "Slower",
-  STALLED: "Stalled",
-  CRASHED: "Crashed",
-};
+const FLEET_SIZES = [4, 8, 12, 16, 24];
 
-export function Fleet({
-  cars,
+export function CarsMenu({
+  snap,
   selectedId,
   onSelect,
+  send,
 }: {
-  cars: CarSnap[];
+  snap: Snapshot;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  send: (message: Record<string, unknown>) => void;
 }) {
+  const live = snap.cars.filter((car) => !car.arrived);
+  const stats = snap.stats
+    ? `Arrivals ${snap.stats.arrivals} · crashes ${snap.stats.crashes} · ped hits ${snap.stats.ped_hits}${snap.wet ? " · wet" : ""}`
+    : null;
+
   return (
-    <div className="flex gap-2 overflow-x-auto px-3 py-2">
-      {cars.map((car) => {
-        const selected = car.id === selectedId;
-        return (
-          <button
-            key={car.id}
-            type="button"
-            onClick={() => onSelect(car.id)}
-            className="flex min-w-[148px] items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left"
-            style={selected ? { borderColor: car.color } : undefined}
-          >
-            <span className="size-2.5 shrink-0 rounded-full" style={{ background: car.color }} />
-            <span className="min-w-0">
-              <span className="block text-xs font-medium">{car.name}</span>
-              <span className="block font-mono text-[10px] text-muted-foreground">
-                {car.speed.toFixed(1)} m/s · {LABELS[car.decision.meta_action] ?? car.decision.meta_action}
-              </span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <DropdownMenu
+      button={{ label: "Cars", size: "sm", variant: "ghost" }}
+      menuWidth={280}
+      menuMaxHeight={420}
+      footer={stats ? <Text color="secondary">{stats}</Text> : undefined}
+      items={[
+        {
+          type: "section",
+          title: live.length ? `${live.length} driving` : "No cars on the road",
+          items: live.length
+            ? live.map((car: CarSnap) => ({
+                id: car.id,
+                label: car.name,
+                description: `${car.from ?? "?"} → ${car.to ?? "?"} · ${car.speed.toFixed(0)} m/s`,
+                onClick: () => onSelect(car.id),
+                endContent: car.id === selectedId ? <Text color="secondary">Selected</Text> : undefined,
+              }))
+            : [{ label: "None on the road", isDisabled: true }],
+        },
+        { type: "divider" },
+        {
+          type: "section",
+          title: "Fleet size",
+          items: FLEET_SIZES.map((n) => ({
+            label: String(n),
+            description: snap.fleet?.size === n ? "Current" : undefined,
+            onClick: () => send({ op: "fleet_size", value: n }),
+          })),
+        },
+      ]}
+    />
   );
 }

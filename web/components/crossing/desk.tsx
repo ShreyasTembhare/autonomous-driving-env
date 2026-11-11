@@ -1,26 +1,83 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useEffect, useRef, useState } from "react";
+import { AppShell } from "@astryxdesign/core/AppShell";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Center } from "@astryxdesign/core/Center";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { HStack } from "@astryxdesign/core/HStack";
+import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from "@astryxdesign/core/Layout";
+import { List, ListItem } from "@astryxdesign/core/List";
+import {
+  SegmentedControl,
+  SegmentedControlItem,
+} from "@astryxdesign/core/SegmentedControl";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
+import { useToast } from "@astryxdesign/core/Toast";
+import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
+import { VStack } from "@astryxdesign/core/VStack";
 import { CrossingCanvas } from "@/components/crossing/canvas-view";
-import { Fleet } from "@/components/crossing/fleet";
+import { CarsMenu } from "@/components/crossing/fleet";
 import { Inspector } from "@/components/crossing/inspector";
-import { SurprisePanel } from "@/components/crossing/surprises";
+import { SceneMenu } from "@/components/crossing/surprises";
+import { TripTool } from "@/components/crossing/trip-tool";
 import { TrainView } from "@/components/crossing/train-view";
 import { useSim } from "@/lib/use-sim";
+import type { CarSnap, TripMode } from "@/lib/types";
 
 const SPEEDS = [0.5, 1, 2, 4];
 
 export function Desk() {
-  const { status, snap, send, retry } = useSim();
+  const { status, snap, network, send, previewRoute, retry } = useSim();
+  const showToast = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [view, setView] = useState<"town" | "train">("town");
-  const [surpriseOpen, setSurpriseOpen] = useState(false);
-  const [inspectOpen, setInspectOpen] = useState(false);
+  const [follow, setFollow] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const [tripMode, setTripMode] = useState<TripMode>("idle");
+  const [previewPoints, setPreviewPoints] = useState<[number, number][] | null>(null);
+  const [pendingPoint, setPendingPoint] = useState<{ x: number; y: number } | null>(null);
+  const [seenIntro, setSeenIntro] = useState(true);
+  const lastCar = useRef<CarSnap | null>(null);
+  const seenNotices = useRef(new Set<number>());
 
   const cars = snap?.cars ?? [];
   const selected = cars.find((car) => car.id === selectedId) ?? null;
+  if (selected) lastCar.current = selected;
+  const inspected = selected ?? lastCar.current;
+
+  useEffect(() => {
+    try {
+      setSeenIntro(localStorage.getItem("crossing-intro") === "1");
+    } catch {
+      setSeenIntro(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (snap?.last_spawned) {
+      setSelectedId(snap.last_spawned);
+      setFollow(true);
+    }
+  }, [snap?.last_spawned]);
+
+  useEffect(() => {
+    for (const notice of snap?.notices ?? []) {
+      if (seenNotices.current.has(notice.id)) continue;
+      seenNotices.current.add(notice.id);
+      showToast({
+        body: notice.text,
+        type: notice.kind === "error" ? "error" : "info",
+        uniqueID: String(notice.id),
+      });
+    }
+  }, [snap?.notices, showToast]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -31,13 +88,21 @@ export function Desk() {
         if (!snap) return;
         send({ op: snap.paused ? "play" : "pause" });
       }
+      if (event.key === "f" || event.key === "F") setFollow((v) => !v);
+      if (event.key === "?" || event.key === "h") setHelpOpen((v) => !v);
+      if (event.key === "Escape") {
+        setTripMode("idle");
+        setPreviewPoints(null);
+        setSelectedId(null);
+      }
       if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-        if (!cars.length) return;
-        const index = Math.max(0, cars.findIndex((car) => car.id === selectedId));
+        const live = cars.filter((c) => !c.arrived);
+        if (!live.length) return;
+        const index = Math.max(0, live.findIndex((car) => car.id === selectedId));
         const next =
           event.key === "ArrowRight"
-            ? cars[(index + 1) % cars.length]
-            : cars[(index - 1 + cars.length) % cars.length];
+            ? live[(index + 1) % live.length]
+            : live[(index - 1 + live.length) % live.length];
         setSelectedId(next.id);
       }
     };
@@ -45,160 +110,243 @@ export function Desk() {
     return () => window.removeEventListener("keydown", onKey);
   }, [cars, selectedId, send, snap]);
 
-  return (
-    <div className="dark flex h-dvh flex-col bg-background text-foreground">
-      <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <div className="mr-2">
-          <div className="text-sm font-medium">The crossing</div>
-          <div className="text-[11px] text-muted-foreground">
-            {snap ? snap.signal.label : "One intersection, six cars"}
-          </div>
-        </div>
-        <Button
-          size="sm"
-          variant={view === "town" ? "secondary" : "ghost"}
-          onClick={() => setView("town")}
-        >
-          Town
-        </Button>
-        <Button
-          size="sm"
-          variant={view === "train" ? "secondary" : "ghost"}
-          onClick={() => setView("train")}
-        >
-          Train
-        </Button>
-        <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
-        <Button
-          size="sm"
-          disabled={!snap || status !== "open"}
-          onClick={() => snap && send({ op: snap.paused ? "play" : "pause" })}
-        >
-          {snap?.paused ? "Play" : "Pause"}
-        </Button>
-        {SPEEDS.map((speed) => (
-          <Button
-            key={speed}
-            size="sm"
-            variant={snap?.speed === speed ? "secondary" : "outline"}
-            onClick={() => send({ op: "speed", value: speed })}
-          >
-            {speed}×
-          </Button>
-        ))}
-        <Button size="sm" variant="outline" onClick={() => send({ op: "reset" })}>
-          Reset
-        </Button>
-        <Button
-          size="sm"
-          variant={surpriseOpen ? "secondary" : "outline"}
-          onClick={() => setSurpriseOpen(true)}
-        >
-          Surprises
-        </Button>
-        <div className="ml-auto flex items-center gap-2">
-          <Status status={status} onRetry={retry} />
-        </div>
-      </header>
+  const dismissIntro = () => {
+    setSeenIntro(true);
+    setHelpOpen(false);
+    try {
+      localStorage.setItem("crossing-intro", "1");
+    } catch {
+      /* ignore */
+    }
+  };
 
-      {status === "connecting" && !snap ? (
-        <div className="flex flex-1 items-center justify-center px-6 text-sm text-muted-foreground">
-          Connecting to the crossing…
-        </div>
-      ) : status === "error" && !snap ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="max-w-sm text-sm leading-6">
-            The sim socket dropped. Start the Python server on port 43124, then retry.
-          </p>
-          <Button onClick={retry}>Retry</Button>
-        </div>
-      ) : view === "train" && snap ? (
-        <TrainView train={snap.train} send={send} />
-      ) : snap ? (
-        <>
-          <div className="flex gap-2 border-b px-3 py-2 md:hidden">
-            <Button size="sm" variant="outline" onClick={() => setInspectOpen(true)}>
-              Inspector
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <main className="relative h-full min-h-0">
-              {status === "error" ? (
-                <div className="absolute inset-x-0 top-2 z-10 mx-auto flex w-fit items-center gap-2 rounded-md border bg-popover px-3 py-2 text-xs">
-                  The sim socket dropped.
-                  <Button size="xs" onClick={retry}>
-                    Retry
-                  </Button>
-                </div>
-              ) : null}
-              <CrossingCanvas snap={snap} selectedId={selectedId} onSelect={setSelectedId} />
-              {snap.all_crashed ? (
-                <div className="absolute inset-x-0 bottom-4 mx-auto w-[min(100%-2rem,28rem)] rounded-lg border bg-popover p-4 shadow-lg">
-                  <p className="text-sm font-medium">Every car has crashed.</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    The crossing is stopped. Reset brings the six of them back to the start of their
-                    routes.
-                  </p>
-                  <Button className="mt-3" size="sm" onClick={() => send({ op: "reset" })}>
-                    Reset the town
-                  </Button>
-                </div>
-              ) : null}
-              {snap.paused && !snap.all_crashed ? (
-                <div className="pointer-events-none absolute top-2 left-2 rounded-md border bg-popover px-2 py-1 text-[11px]">
-                  Paused
-                </div>
-              ) : null}
-              {selected ? (
-                <aside className="absolute inset-y-0 right-0 z-10 hidden w-[340px] border-l bg-background/95 shadow-xl backdrop-blur md:block">
-                  <button
-                    type="button"
-                    aria-label="Close inspector"
-                    onClick={() => setSelectedId(null)}
-                    className="absolute top-2 right-2 z-10 size-7 rounded-md text-sm hover:bg-muted"
-                  >
-                    ×
-                  </button>
-                  <Inspector car={selected} paused={snap.paused} />
-                </aside>
-              ) : null}
-            </main>
-          </div>
-          <footer className="border-t">
-            <Fleet cars={snap.cars} selectedId={selectedId} onSelect={setSelectedId} />
-          </footer>
-          <Sheet open={surpriseOpen} onOpenChange={setSurpriseOpen}>
-            <SheetContent side="left" className="w-[min(100%,22rem)] p-0">
-              <SheetHeader className="sr-only">
-                <SheetTitle>Surprises</SheetTitle>
-              </SheetHeader>
-              <SurprisePanel snap={snap} selectedId={selectedId} send={send} />
-            </SheetContent>
-          </Sheet>
-          <Sheet open={inspectOpen} onOpenChange={setInspectOpen}>
-            <SheetContent side="right" className="w-[min(100%,24rem)] p-0">
-              <SheetHeader className="sr-only">
-                <SheetTitle>Inspector</SheetTitle>
-              </SheetHeader>
-              <Inspector car={selected} paused={snap.paused} />
-            </SheetContent>
-          </Sheet>
-        </>
+  const banner = (
+    <VStack gap={2}>
+      {status === "error" && snap ? (
+        <Banner
+          status="error"
+          container="section"
+          title="The sim socket dropped"
+          endContent={<Button label="Retry" size="sm" onClick={retry} />}
+        />
       ) : null}
-    </div>
+      {snap?.all_crashed ? (
+        <Banner
+          status="warning"
+          container="section"
+          title="Every car has crashed"
+          endContent={<Button label="Reset the town" size="sm" onClick={() => send({ op: "reset" })} />}
+        />
+      ) : null}
+    </VStack>
   );
-}
 
-function Status({ status, onRetry }: { status: string; onRetry: () => void }) {
-  if (status === "open") {
-    return <span className="text-xs text-muted-foreground">Socket live</span>;
+  const header = snap ? (
+    <TopNav
+      label="Crossing"
+      heading={<TopNavHeading heading="The crossing" />}
+      startContent={
+        <HStack gap={2} vAlign="center">
+          <SegmentedControl
+            label="View"
+            size="sm"
+            value={view}
+            onChange={(value) => {
+              const next = value as "town" | "train";
+              setView(next);
+              if (next === "train") setSelectedId(null);
+            }}
+          >
+            <SegmentedControlItem value="town" label="Town" />
+            <SegmentedControlItem value="train" label="Train" />
+          </SegmentedControl>
+          <Button
+            label={snap.paused ? "Play" : "Pause"}
+            size="sm"
+            variant="primary"
+            isDisabled={status !== "open"}
+            onClick={() => send({ op: snap.paused ? "play" : "pause" })}
+          />
+        </HStack>
+      }
+      endContent={
+        <HStack gap={1} vAlign="center">
+          {view === "town" ? (
+            <>
+              <TripTool
+                mode={tripMode}
+                network={network}
+                selectedId={selectedId}
+                canSpawn={(snap.fleet?.total ?? 0) < (snap.fleet?.max ?? 24)}
+                previewRoute={previewRoute}
+                pendingPoint={pendingPoint}
+                onMode={setTripMode}
+                onPreview={setPreviewPoints}
+                onSend={send}
+                onClearPoint={() => setPendingPoint(null)}
+              />
+              <SceneMenu snap={snap} selectedId={selectedId} selectedNode={selectedNode} send={send} />
+              <CarsMenu snap={snap} selectedId={selectedId} onSelect={setSelectedId} send={send} />
+            </>
+          ) : null}
+          <DropdownMenu
+            button={{ label: `${snap.speed}×`, size: "sm", variant: "ghost" }}
+            header={<Text color="secondary">How fast the town runs</Text>}
+            items={SPEEDS.map((speed) => ({
+              label: `${speed}×`,
+              description: speed === 1 ? "Real time" : undefined,
+              onClick: () => send({ op: "speed", value: speed }),
+            }))}
+          />
+          <DropdownMenu
+            button={{ label: "More", size: "sm", variant: "ghost" }}
+            items={[
+              { label: "Reset", description: "Start the district over", onClick: () => send({ op: "reset" }) },
+              {
+                label: follow ? "Stop following" : "Follow",
+                description: "Keep the map on the selected car",
+                onClick: () => setFollow((v) => !v),
+              },
+              { label: "How this works", onClick: () => setHelpOpen(true) },
+            ]}
+          />
+          {status === "error" ? (
+            <Button label="Retry" size="sm" variant="destructive" onClick={retry} />
+          ) : (
+            <Text color="secondary">{status === "open" ? "Connected" : "Connecting"}</Text>
+          )}
+        </HStack>
+      }
+    />
+  ) : undefined;
+
+  let content;
+  if (status === "connecting" && !snap) {
+    content = (
+      <Center height="100%">
+        <EmptyState title="Connecting to the crossing" headingLevel={1} />
+      </Center>
+    );
+  } else if (status === "error" && !snap) {
+    content = (
+      <Center height="100%">
+        <EmptyState
+          title="The sim socket dropped"
+          headingLevel={1}
+          description="Start the Python server on port 43124, then retry."
+          actions={<Button label="Retry" variant="primary" onClick={retry} />}
+        />
+      </Center>
+    );
+  } else if (view === "train" && snap) {
+    content = <TrainView train={snap.train} send={send} />;
+  } else if (snap) {
+    content = (
+      <CrossingCanvas
+        snap={snap}
+        network={network}
+        selectedId={selectedId}
+        hoverPathKey={hoverPath}
+        follow={follow}
+        previewPoints={previewPoints}
+        tripPicking={tripMode !== "idle"}
+        onSelect={setSelectedId}
+        onSelectNode={setSelectedNode}
+        onMapClick={(x, y) => setPendingPoint({ x, y })}
+      />
+    );
+  } else {
+    content = null;
   }
-  if (status === "connecting") {
-    return <span className="text-xs text-muted-foreground">Connecting</span>;
-  }
+
   return (
-    <Button size="xs" variant="destructive" onClick={onRetry}>
-      Socket down · Retry
-    </Button>
+    <>
+      <AppShell
+        height="fill"
+        contentPadding={0}
+        variant="wash"
+        mobileNav={false}
+        banner={snap ? banner : undefined}
+        topNav={header}
+      >
+        {content}
+      </AppShell>
+      <Inspector
+        car={inspected}
+        isOpen={Boolean(selected)}
+        paused={Boolean(snap?.paused)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        onHoverOption={setHoverPath}
+      />
+      <Dialog
+        isOpen={helpOpen || (!seenIntro && Boolean(snap))}
+        onOpenChange={(open) => {
+          if (!open) dismissIntro();
+        }}
+        width={440}
+      >
+        <Layout
+          header={
+            <LayoutHeader>
+              <DialogHeader title="How this works" onOpenChange={() => dismissIntro()} />
+            </LayoutHeader>
+          }
+          content={
+            <LayoutContent>
+              <VStack gap={4}>
+                <Text>
+                  Six streets, eight lights, and cars that pick their own speed and lane. Click a car and the side
+                  panel shows the choice it just made.
+                </Text>
+                <VStack gap={3}>
+                  <VStack gap={1}>
+                    <Text weight="medium">Cars</Text>
+                    <Text color="secondary">
+                      Pick a name, or click one on the map. Arrow keys move through the ones still driving.
+                    </Text>
+                  </VStack>
+                  <VStack gap={1}>
+                    <Text weight="medium">Trip</Text>
+                    <Text color="secondary">Add a car, or send the selected one to a new destination.</Text>
+                  </VStack>
+                  <VStack gap={1}>
+                    <Text weight="medium">Surprise</Text>
+                    <Text color="secondary">
+                      Flip a light, send a jaywalker, stall a car, or wet the pavement. The town keeps running.
+                    </Text>
+                  </VStack>
+                  <VStack gap={1}>
+                    <Text weight="medium">Train</Text>
+                    <Text color="secondary">
+                      Fit a small network onto the careful and hurried cars. Their rules still drive.
+                    </Text>
+                  </VStack>
+                </VStack>
+                <Text color="secondary">
+                  Green, yellow, and red are the signals. Click a lamp before Flip, All-red, or Restore. The line behind
+                  a selected car is the route it is on.
+                </Text>
+                <Heading level={2}>Keys</Heading>
+                <List density="compact" edge="flush">
+                  <ListItem label="Play or pause" endContent={<Text color="secondary">Space</Text>} />
+                  <ListItem label="Next or previous car" endContent={<Text color="secondary">← →</Text>} />
+                  <ListItem label="Follow the selected car" endContent={<Text color="secondary">F</Text>} />
+                  <ListItem label="Zoom to a car" description="Double-click it" />
+                  <ListItem label="Cancel a trip or clear the selection" endContent={<Text color="secondary">Esc</Text>} />
+                  <ListItem label="Open this again" endContent={<Text color="secondary">? or H</Text>} />
+                </List>
+              </VStack>
+            </LayoutContent>
+          }
+          footer={
+            <LayoutFooter>
+              <Button label="Got it" variant="primary" onClick={dismissIntro} />
+            </LayoutFooter>
+          }
+        />
+      </Dialog>
+    </>
   );
 }
