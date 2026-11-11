@@ -43,7 +43,7 @@ export function Desk() {
   const [tripMode, setTripMode] = useState<TripMode>("idle");
   const [previewPoints, setPreviewPoints] = useState<[number, number][] | null>(null);
   const [pendingPoint, setPendingPoint] = useState<{ x: number; y: number } | null>(null);
-  const [seenIntro, setSeenIntro] = useState(true);
+  const [seenGuide, setSeenGuide] = useState(true);
   const lastCar = useRef<CarSnap | null>(null);
   const seenNotices = useRef(new Set<number>());
 
@@ -54,9 +54,9 @@ export function Desk() {
 
   useEffect(() => {
     try {
-      setSeenIntro(localStorage.getItem("crossing-intro") === "1");
+      setSeenGuide(localStorage.getItem("crossing-guide") === "1");
     } catch {
-      setSeenIntro(false);
+      setSeenGuide(false);
     }
   }, []);
 
@@ -110,11 +110,10 @@ export function Desk() {
     return () => window.removeEventListener("keydown", onKey);
   }, [cars, selectedId, send, snap]);
 
-  const dismissIntro = () => {
-    setSeenIntro(true);
-    setHelpOpen(false);
+  const dismissGuide = () => {
+    setSeenGuide(true);
     try {
-      localStorage.setItem("crossing-intro", "1");
+      localStorage.setItem("crossing-guide", "1");
     } catch {
       /* ignore */
     }
@@ -128,6 +127,17 @@ export function Desk() {
           container="section"
           title="The sim socket dropped"
           endContent={<Button label="Retry" size="sm" onClick={retry} />}
+        />
+      ) : null}
+      {!seenGuide && view === "town" ? (
+        <Banner
+          status="info"
+          container="section"
+          title="Click a car to read the choice it just made"
+          description="Each car picks its own speed and lane. Trip adds a car. Surprise changes a light or the street, and the town keeps running. Train fits a small network onto the careful and hurried cars."
+          isDismissable
+          onDismiss={dismissGuide}
+          endContent={<Button label="Full guide" size="sm" onClick={() => setHelpOpen(true)} />}
         />
       ) : null}
       {snap?.all_crashed ? (
@@ -167,6 +177,7 @@ export function Desk() {
             isDisabled={status !== "open"}
             onClick={() => send({ op: snap.paused ? "play" : "pause" })}
           />
+          <Button label="Guide" size="sm" variant="ghost" onClick={() => setHelpOpen(true)} />
         </HStack>
       }
       endContent={
@@ -280,17 +291,11 @@ export function Desk() {
         }}
         onHoverOption={setHoverPath}
       />
-      <Dialog
-        isOpen={helpOpen || (!seenIntro && Boolean(snap))}
-        onOpenChange={(open) => {
-          if (!open) dismissIntro();
-        }}
-        width={440}
-      >
+      <Dialog isOpen={helpOpen} onOpenChange={setHelpOpen} width={440}>
         <Layout
           header={
             <LayoutHeader>
-              <DialogHeader title="How this works" onOpenChange={() => dismissIntro()} />
+              <DialogHeader title="How this works" onOpenChange={setHelpOpen} />
             </LayoutHeader>
           }
           content={
@@ -342,7 +347,14 @@ export function Desk() {
           }
           footer={
             <LayoutFooter>
-              <Button label="Got it" variant="primary" onClick={dismissIntro} />
+              <Button
+                label="Got it"
+                variant="primary"
+                onClick={() => {
+                  dismissGuide();
+                  setHelpOpen(false);
+                }}
+              />
             </LayoutFooter>
           }
         />
